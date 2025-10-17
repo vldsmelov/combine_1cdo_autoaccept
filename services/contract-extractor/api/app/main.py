@@ -74,12 +74,6 @@ async def _process_text_payload(text: str):
 async def healthz():
     return {"status": "ok"}
 
-
-@app.get("/health")
-async def health():
-    """Backward compatible health endpoint for orchestrators."""
-    return await healthz()
-
 @app.get("/status")
 async def status():
     return {

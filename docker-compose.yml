@@ -1,8 +1,4 @@
-x-healthcheck-defaults: &healthcheck-defaults
-  interval: 10s
-  timeout: 5s
-  retries: 5
-  start_period: 10s
+version: "3.9"
 
 services:
   proxy:
@@ -12,7 +8,7 @@ services:
     depends_on:
       contract-extractor:
         condition: service_healthy
-      globas-api:
+      globas-syntetic:
         condition: service_healthy
       legal-ai:
         condition: service_healthy
@@ -20,166 +16,53 @@ services:
       - backend
 
   contract-extractor:
-    build:
-      context: ./services/contract-extractor
+    build: ./services/contract_extractor
+    container_name: contract-extractor
     expose:
       - "8080"
     ports:
       - "18080:8080"
     healthcheck:
-      <<: *healthcheck-defaults
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-    restart: unless-stopped
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     networks:
       - backend
 
-  globas-db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: globas
-      POSTGRES_USER: globas
-      POSTGRES_PASSWORD: globas
-    ports:
-      - "25432:5432"
-    healthcheck:
-      <<: *healthcheck-defaults
-      test: ["CMD-SHELL", "pg_isready -U globas -d globas"]
-    volumes:
-      - globas_db_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - backend
-
-  globas-api:
-    build:
-      context: ./services/globas/api
-    depends_on:
-      globas-db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql+psycopg2://globas:globas@globas-db:5432/globas
+  globas-syntetic:
+    build: ./services/globas_syntetic
+    container_name: globas-syntetic
     expose:
-      - "8000"
+      - "8090"
     ports:
-      - "18090:8000"
-    volumes:
-      - ./services/globas/config:/app/config:ro
+      - "18090:8090"
     healthcheck:
-      <<: *healthcheck-defaults
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    restart: unless-stopped
-    networks:
-      - backend
-
-  legal-ai-ollama:
-    image: ollama/ollama:latest
-    environment:
-      OLLAMA_HOST: 0.0.0.0:11434
-    ports:
-      - "21434:11434"
-    volumes:
-      - legal_ai_ollama:/root/.ollama
-    healthcheck:
-      <<: *healthcheck-defaults
-      test: ["CMD-SHELL", "OLLAMA_HOST=127.0.0.1:11434 ollama list >/dev/null 2>&1 || exit 1"]
-    restart: unless-stopped
-    networks:
-      - backend
-
-  legal-ai-ollama-pull:
-    image: curlimages/curl:8.10.1
-    depends_on:
-      legal-ai-ollama:
-        condition: service_healthy
-    environment:
-      OLLAMA_API: http://legal-ai-ollama:11434
-      OLLAMA_MODEL: qwen2.5:7b-instruct
-    entrypoint:
-      - /bin/sh
-      - -lc
-      - |
-        echo "[ollama-pull] waiting for $${OLLAMA_API} ..."
-        for i in $$(seq 1 120); do
-          if curl -fsS $${OLLAMA_API}/api/tags >/dev/null; then
-            echo "[ollama-pull] server is up"; break
-          fi
-          sleep 2
-        done
-        echo "[ollama-pull] pulling model $${OLLAMA_MODEL}"
-        curl -fsS -X POST $${OLLAMA_API}/api/pull \
-          -H 'Content-Type: application/json' \
-          -d '{"name":"'"$${OLLAMA_MODEL}"'"}' \
-          | sed -u 's/^/[ollama-pull] /'
-        echo "[ollama-pull] done"
-    restart: "no"
-    networks:
-      - backend
-
-  legal-ai-qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "26333:6333"
-      - "26334:6334"
-    volumes:
-      - legal_ai_qdrant:/qdrant/storage
-    restart: unless-stopped
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     networks:
       - backend
 
   legal-ai:
-    build:
-      context: ./services/legal_ai_1C/backend
-      dockerfile: Dockerfile
-      target: runtime
-    depends_on:
-      legal-ai-ollama-pull:
-        condition: service_completed_successfully
-      legal-ai-qdrant:
-        condition: service_started
-    environment:
-      OLLAMA_BASE_URL: http://legal-ai-ollama:11434
-      OLLAMA_MODEL: qwen2.5:7b-instruct
-      QDRANT_URL: http://legal-ai-qdrant:6333
-      QDRANT_COLLECTION: ru_law_m3
-      EMBEDDING_MODEL: BAAI/bge-m3
-      RAG_TOP_K: "5"
-      EMBED_DEVICE: auto
-      PYTORCH_ALLOC_CONF: max_split_size_mb:256,expandable_segments:True
-      STARTUP_CHECKS: "1"
-      STARTUP_CUDA_NAME: ""
-      SELF_CHECK_TIMEOUT: "15"
-      SELF_CHECK_GEN: "0"
-      EMBED_PRELOAD: "0"
-      RERANK_ENABLE: "1"
-      RERANK_PRELOAD: "0"
-      RERANKER_MODEL: BAAI/bge-reranker-v2-m3
-      RERANK_DEVICE: cpu
-      RERANK_KEEP: "5"
-      RERANK_BATCH: "8"
-      RERANK_DEBUG: "0"
-      NET_TEST_URLS: https://pravo.gov.ru/
-    working_dir: /workspace/backend
-    command: uvicorn app:app --host 0.0.0.0 --port 8000 --log-level info
-    volumes:
-      - ./services/legal_ai_1C/backend:/workspace/backend
-      - ./services/legal_ai_1C/corpus:/workspace/corpus:ro
+    build: ./services/legal_ai
+    container_name: legal-ai
     expose:
-      - "8000"
+      - "8100"
     ports:
-      - "18100:8000"
+      - "18100:8100"
     healthcheck:
-      <<: *healthcheck-defaults
-      start_period: 60s
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    restart: unless-stopped
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     networks:
       - backend
 
 networks:
   backend:
     driver: bridge
-
-volumes:
-  globas_db_data:
-  legal_ai_ollama:
-  legal_ai_qdrant:
