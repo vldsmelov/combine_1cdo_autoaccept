@@ -97,8 +97,11 @@ class ExtractionPipeline:
         raw_outputs: List[str] = []
 
         if self.summary_llm is not None:
+            summary_payload: Dict[str, Any] = {}
             try:
-                summary_payload = await self.summary_llm.extract(cleaned_text, {})
+                result = await self.summary_llm.extract(cleaned_text, {})
+                if isinstance(result, dict):
+                    summary_payload = result
             except Exception:  # noqa: BLE001
                 logger.exception("Summary extractor failed")
                 warnings.append(
@@ -107,43 +110,27 @@ class ExtractionPipeline:
                         message="Не удалось получить краткое содержание из модели; возвращены правила",
                     )
                 )
-                summary_payload = {}
-            candidate_summary = (
-                summary_payload.get("КраткоеСодержание")
-                if isinstance(summary_payload, dict)
-                else ""
-            )
-            candidate_rationale = (
-                summary_payload.get("ОбоснованиеВыбора")
-                if isinstance(summary_payload, dict)
-                else ""
-            )
-            candidate_okpd2 = (
-                summary_payload.get("ОЭЗ_ОКПД2")
-                if isinstance(summary_payload, dict)
-                else ""
-            )
-            candidate_contract_term = (
-                summary_payload.get("СрокДоговора")
-                if isinstance(summary_payload, dict)
-                else ""
-            )
-            candidate_responsible = (
-                summary_payload.get("Ответственный")
-                if isinstance(summary_payload, dict)
-                else ""
-            )
-            candidate_contract_type = (
-                summary_payload.get("seza_ТипДоговора")
-                if isinstance(summary_payload, dict)
-                else ""
-            )
-            candidate_payment_method = (
-                summary_payload.get("СпособОплаты")
-                if isinstance(summary_payload, dict)
-                else ""
-            )
-            
+            else:
+                if not isinstance(result, dict):
+                    logger.warning(
+                        "Summary extractor returned non-dict payload: %s", type(result)
+                    )
+            finally:
+                summary_prompt = getattr(self.summary_llm, "last_prompt", "")
+                if summary_prompt:
+                    prompts.append(summary_prompt)
+                summary_raw = getattr(self.summary_llm, "last_raw", "")
+                if summary_raw:
+                    raw_outputs.append(summary_raw)
+
+            candidate_summary = summary_payload.get("КраткоеСодержание", "")
+            candidate_rationale = summary_payload.get("ОбоснованиеВыбора", "")
+            candidate_okpd2 = summary_payload.get("ОЭЗ_ОКПД2", "")
+            candidate_contract_term = summary_payload.get("СрокДоговора", "")
+            candidate_responsible = summary_payload.get("Ответственный", "")
+            candidate_contract_type = summary_payload.get("seza_ТипДоговора", "")
+            candidate_payment_method = summary_payload.get("СпособОплаты", "")
+
             if isinstance(candidate_summary, str):
                 summary_text = clamp_summary_text(candidate_summary)
             if isinstance(candidate_rationale, str):
@@ -158,64 +145,75 @@ class ExtractionPipeline:
                 contract_type = candidate_contract_type.strip()
             if isinstance(candidate_payment_method, str):
                 payment_method = candidate_payment_method.strip()
-                
-            if getattr(self.summary_llm, "last_prompt", ""):
-                prompts.append(self.summary_llm.last_prompt)
-            if getattr(self.summary_llm, "last_raw", ""):
-                raw_outputs.append(self.summary_llm.last_raw)
 
         # 1) Правила
         partial = await self.rules.extract(cleaned_text, {})
 
         # 2) LLM (если включен)
-        prompt = ""
         if self.llm is not None:
-            self.field_settings.refresh_prompts()
-            aggregated = dict(partial)
-            for group in self.field_settings.build_llm_groups():
-                schema_subset = self.field_settings.build_schema_subset(
-                    self.schema, group.fields
-                )
-                guidelines = self.field_settings.build_guidelines_bundle(group.fields)
-                segment = group.document_slice.extract(cleaned_text)
-                group_partial = {
-                    key: aggregated[key]
-                    for key in group.fields
-                    if key in aggregated
-                }
-                try:
-                    llm_result = await self.llm.extract(
-                        segment,
-                        group_partial,
-                        schema_override=schema_subset,
-                        field_guidelines=guidelines,
+            aggregated: Dict[str, Any] = dict(partial)
+            try:
+                self.field_settings.refresh_prompts()
+                for group in self.field_settings.build_llm_groups():
+                    schema_subset = self.field_settings.build_schema_subset(
+                        self.schema, group.fields
                     )
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "LLM extractor failed for fields %s", ", ".join(group.fields)
-                    )
-                    warnings.append(
-                        WarningItem(
-                            code="llm_error",
-                            message=(
-                                "Не удалось получить данные из модели для некоторых полей; "
-                                "использованы результаты правил"
-                            ),
+                    guidelines = self.field_settings.build_guidelines_bundle(group.fields)
+                    segment = group.document_slice.extract(cleaned_text)
+                    group_partial = {
+                        key: aggregated[key]
+                        for key in group.fields
+                        if key in aggregated
+                    }
+                    try:
+                        llm_result = await self.llm.extract(
+                            segment,
+                            group_partial,
+                            schema_override=schema_subset,
+                            field_guidelines=guidelines,
                         )
-                    )
-                    continue
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "LLM extractor failed for fields %s", ", ".join(group.fields)
+                        )
+                        warnings.append(
+                            WarningItem(
+                                code="llm_error",
+                                message=(
+                                    "Не удалось получить данные из модели для некоторых полей; "
+                                    "использованы результаты правил"
+                                ),
+                            )
+                        )
+                        continue
 
-                for field in group.fields:
-                    if field in llm_result:
-                        aggregated[field] = llm_result[field]
-                if self.llm.last_prompt:
-                    prompts.append(self.llm.last_prompt)
-                if getattr(self.llm, "last_raw", ""):
-                    raw_outputs.append(self.llm.last_raw)
-            data = aggregated
-            prompt = "\n\n-----\n\n".join(prompts)
+                    for field in group.fields:
+                        if field in llm_result:
+                            aggregated[field] = llm_result[field]
+                    llm_prompt = getattr(self.llm, "last_prompt", "")
+                    if llm_prompt:
+                        prompts.append(llm_prompt)
+                    llm_raw = getattr(self.llm, "last_raw", "")
+                    if llm_raw:
+                        raw_outputs.append(llm_raw)
+            except Exception:  # noqa: BLE001
+                logger.exception("LLM extractor failed with unexpected error")
+                warnings.append(
+                    WarningItem(
+                        code="llm_error",
+                        message=(
+                            "Не удалось получить данные из модели для некоторых полей; "
+                            "использованы результаты правил"
+                        ),
+                    )
+                )
+                data = partial
+            else:
+                data = aggregated
         else:
             data = partial
+
+        prompt = "\n\n-----\n\n".join(prompts)
 
         if okpd2_code:
             data["ОЭЗ_ОКПД2"] = okpd2_code
