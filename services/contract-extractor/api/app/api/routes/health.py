@@ -65,3 +65,23 @@ async def version(container: AppContainer = Depends(container_dependency)) -> di
     """Возвращает версию сервиса и имя приложения."""
 
     return {"version": container.config.version, "app": container.config.app_name}
+
+
+@router.get("/llmcherck")
+async def llmcherck(container: AppContainer = Depends(container_dependency)) -> dict:
+    """Простой запрос к LLM для проверки доступности модели."""
+
+    if not container.config.use_llm:
+        raise HTTPException(status_code=503, detail="LLM usage is disabled in configuration")
+
+    question = "ты кто?"
+
+    try:
+        answer = await container.client.chat(
+            system_prompt="You are a helpful assistant.",
+            user_prompt=question,
+        )
+    except Exception as exc:  # pragma: no cover - зависимость от внешней системы
+        raise HTTPException(status_code=502, detail=f"Ollama error: {exc}") from exc
+
+    return {"question": question, "answer": answer}
