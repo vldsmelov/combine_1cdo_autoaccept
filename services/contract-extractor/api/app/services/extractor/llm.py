@@ -80,9 +80,21 @@ class LLMExtractor(BaseExtractor):
         if not isinstance(data, dict):
             data = {}
 
-        # Не перетираем уже найденные правилами поля
-        merged = dict(data)
-        merged.update(partial)  # приоритет у правил/локальной логики
+        # Не перетираем уже найденные правилами поля, если модель не дала значение
+        merged = dict(partial)
+        for key, value in data.items():
+            if key not in merged:
+                merged[key] = value
+                continue
+
+            if value in (None, ""):
+                continue
+
+            if isinstance(value, str) and not value.strip():
+                continue
+
+            merged[key] = value
+
         return merged
 
     def _build_json_skeleton(self, schema: Dict[str, Any] | None = None) -> Dict[str, Any]:
