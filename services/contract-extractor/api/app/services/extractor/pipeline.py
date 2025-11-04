@@ -175,21 +175,14 @@ class ExtractionPipeline:
             if isinstance(candidate_payment_method, str):
                 payment_method = candidate_payment_method.strip()
 
-        # 1) Правила (используем только если LLM отключен)
-        if self.llm is None:
-            partial: Dict[str, Any] = await self.rules.extract(cleaned_text, {})
-        else:
-            partial = {}
-
-        llm_fields = tuple(self.field_settings.llm_fields())
+        # 1) Правила всегда выполняются первыми, чтобы получить базовые значения
+        partial: Dict[str, Any] = await self.rules.extract(cleaned_text, {})
 
         llm_fields = tuple(self.field_settings.llm_fields())
 
         # 2) LLM (если включен)
         if self.llm is not None:
             aggregated: Dict[str, Any] = dict(partial)
-            for field in llm_fields:
-                aggregated.pop(field, None)
             warned_missing_fields: set[str] = set()
             try:
                 self.field_settings.refresh_prompts()
@@ -199,7 +192,11 @@ class ExtractionPipeline:
                     )
                     guidelines = self.field_settings.build_guidelines_bundle(group.fields)
                     segment = group.document_slice.extract(cleaned_text)
-                    group_partial: Dict[str, Any] = {}
+                    group_partial: Dict[str, Any] = {
+                        key: aggregated[key]
+                        for key in group.fields
+                        if key in aggregated and not self._is_empty_value(aggregated[key])
+                    }
                     try:
                         llm_result = await self.llm.extract(
                             segment,
@@ -230,9 +227,11 @@ class ExtractionPipeline:
                         continue
 
                     for field in group.fields:
-                        value = llm_result.get(field, None)
-                        if self._is_empty_value(value):
-                            if field not in warned_missing_fields:
+                        if field not in llm_result:
+                            if (
+                                field not in aggregated
+                                or self._is_empty_value(aggregated[field])
+                            ) and field not in warned_missing_fields:
                                 warnings.append(
                                     WarningItem(
                                         code="llm_missing_field",
@@ -242,7 +241,26 @@ class ExtractionPipeline:
                                     )
                                 )
                                 warned_missing_fields.add(field)
-                            aggregated[field] = self._default_value_for_field(field)
+                                aggregated[field] = self._default_value_for_field(field)
+                            continue
+
+                        value = llm_result.get(field, None)
+                        if self._is_empty_value(value):
+                            if (
+                                field not in aggregated
+                                or self._is_empty_value(aggregated[field])
+                            ):
+                                aggregated[field] = self._default_value_for_field(field)
+                                if field not in warned_missing_fields:
+                                    warnings.append(
+                                        WarningItem(
+                                            code="llm_missing_field",
+                                            message=(
+                                                f"Модель не вернула значение для поля '{field}'"
+                                            ),
+                                        )
+                                    )
+                                    warned_missing_fields.add(field)
                         else:
                             aggregated[field] = value
                     llm_prompt = getattr(self.llm, "last_prompt", "")
@@ -264,7 +282,8 @@ class ExtractionPipeline:
                 )
                 aggregated = dict(partial)
                 for field in llm_fields:
-                    aggregated.pop(field, None)
+                    if field in aggregated and not self._is_empty_value(aggregated[field]):
+                        continue
                     if field not in warned_missing_fields:
                         warnings.append(
                             WarningItem(
@@ -275,11 +294,11 @@ class ExtractionPipeline:
                             )
                         )
                         warned_missing_fields.add(field)
-                    aggregated.setdefault(field, self._default_value_for_field(field))
+                    aggregated[field] = self._default_value_for_field(field)
                 data = aggregated
             else:
                 for field in llm_fields:
-                    if field in aggregated:
+                    if field in aggregated and not self._is_empty_value(aggregated[field]):
                         continue
                     aggregated[field] = self._default_value_for_field(field)
                     if field in warned_missing_fields:
