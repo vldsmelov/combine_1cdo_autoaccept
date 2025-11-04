@@ -44,10 +44,16 @@ services:
     profiles: ["default", "core"]
     build:
       context: ./services/contract-extractor
+    depends_on:
+      legal-ai-ollama-pull:
+        condition: service_completed_successfully
     expose:
       - "8080"
     ports:
       - "18080:8080"
+    environment:
+      OLLAMA_HOST: http://legal-ai-ollama:11434
+      MODEL: qwen3-vl:8b-instruct
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -94,7 +100,7 @@ services:
   legal-ai-ollama:
     <<: *service-defaults
     profiles: ["ml"]
-    image: ollama/ollama:0.3.12
+    image: ollama/ollama:latest
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
       NVIDIA_VISIBLE_DEVICES: all
@@ -123,7 +129,7 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_API: http://legal-ai-ollama:11434
-      OLLAMA_MODEL: qwen3-vl:2b-instruct
+      OLLAMA_MODEL: qwen3-vl:8b-instruct
     entrypoint:
       - /bin/sh
       - -lc
@@ -167,7 +173,7 @@ services:
         condition: service_started
     environment:
       OLLAMA_BASE_URL: http://legal-ai-ollama:11434
-      OLLAMA_MODEL: qwen3-vl:2b-instruct
+      OLLAMA_MODEL: qwen3-vl:8b-instruct
       QDRANT_URL: http://legal-ai-qdrant:6333
       QDRANT_COLLECTION: ru_law_m3
       EMBEDDING_MODEL: BAAI/bge-m3
