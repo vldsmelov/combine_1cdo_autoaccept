@@ -1,6 +1,6 @@
 # Combined Legal Automation Platform
 
-Этот репозиторий объединяет три независимых сервиса — извлечение данных из договоров, проверку контрагентов и ИИ-юриста — в единую демо-платформу. Все сервисы работают в отдельных Docker-контейнерах, а вызовы идут через единый HTTP-шлюз `http://localhost:8000`.
+Этот репозиторий объединяет четыре независимых сервиса — извлечение данных из договоров, проверку контрагентов, ИИ-юриста и ИИ-экономиста — в единую демо-платформу. Все сервисы работают в отдельных Docker-контейнерах, а вызовы идут через единый HTTP-шлюз `http://localhost:8000`.
 
 ## Структура проекта
 
@@ -14,7 +14,8 @@
 └── services/
     ├── contract-extractor/   # сервис извлечения полей
     ├── globas/               # сервис проверки контрагентов
-    └── legal_ai_1C/          # ИИ-юрист + его зависимости
+    ├── legal_ai_1C/          # ИИ-юрист + его зависимости
+    └── ai-economist/         # контроль бюджета и закупок
 ```
 
 Каждый сервис поставляется отдельно. Просто скопируйте/склонируйте код в соответствующую подпапку `services/`. В каталогах уже лежат актуальные Dockerfile'ы из исходных проектов.
@@ -26,6 +27,7 @@
 | Contract Extractor    | `http://localhost:8000/contract-extractor/*` | `18080 → 8080`     | FastAPI-приложение для извлечения полей |
 | Globas API            | `http://localhost:8000/globas/*`   | `18090 → 8000`     | FastAPI + PostgreSQL (`25432 → 5432`) |
 | Legal AI API          | `http://localhost:8000/legal-ai/*` | `18100 → 8000`     | FastAPI, использует Ollama (`21434 → 11434`) и Qdrant (`26333 → 6333`, `26334 → 6334`) |
+| AI Economist          | `http://localhost:8000/ai-economist/*` | `18110 → 8000`     | FastAPI, сопоставление закупок с бюджетом |
 
 > Все сервисы также доступны напрямую по проброшенным портам для отладки. Nginx проксирует запросы, обрезая префикс (`/contract-extractor`, `/globas`, `/legal-ai`).
 
@@ -43,9 +45,10 @@
 3. Проверить готовность можно по health-check'ам или пробным запросам:
 
    ```bash
-   curl http://localhost:8000/contract-extractor/health
-   curl http://localhost:8000/globas/health
-   curl http://localhost:8000/legal-ai/health
+  curl http://localhost:8000/contract-extractor/health
+  curl http://localhost:8000/globas/health
+  curl http://localhost:8000/legal-ai/health
+  curl http://localhost:8000/ai-economist/health
    ```
 
    ⚠️ Запуск Legal AI займёт несколько минут: контейнер скачивает веса моделей Ollama и Qdrant-кластеру требуется инициализация.
@@ -73,6 +76,17 @@ curl -X POST http://localhost:8000/globas/verify \
 curl -X POST http://localhost:8000/legal-ai/analyze \
   -H "Content-Type: application/json" \
   -d '{"text": "The supplier may impose a penalty for late payments. The buyer has no unilateral termination rights."}'
+
+# AI Economist (проверка закупок)
+curl -X POST http://localhost:8000/ai-economist/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+        "budget_id": "demo",
+        "items": [
+          {"name": "Поставка МФУ Canon", "amount": "750 000"},
+          {"name": "Сервер Lenovo", "amount": "1 200 000"}
+        ]
+      }'
 ```
 
 ## Документация
@@ -81,6 +95,7 @@ curl -X POST http://localhost:8000/legal-ai/analyze \
 * [Contract Extractor](docs/contract_extractor.md) — подробности по сервису извлечения.
 * [Globas API](docs/globas.md) — описание проверки контрагентов.
 * [Legal AI Backend](docs/legal_ai.md) — сведения о сервисе юридического анализа.
+* [AI Economist](docs/ai_economist.md) — сервис экономического контроля бюджета.
 
 ## Работа с отдельными сервисами
 
@@ -91,6 +106,7 @@ curl -X POST http://localhost:8000/legal-ai/analyze \
 make rebuild SERVICE=contract-extractor
 make rebuild SERVICE=globas-api
 make rebuild SERVICE=legal-ai
+make rebuild SERVICE=ai-economist
 
 # посмотреть логи
 make logs SERVICE=legal-ai

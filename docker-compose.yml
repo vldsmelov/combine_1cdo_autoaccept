@@ -16,6 +16,8 @@ services:
         condition: service_healthy
       legal-ai:
         condition: service_healthy
+      ai-economist:
+        condition: service_healthy
     networks:
       - backend
 
@@ -64,6 +66,20 @@ services:
       - "18090:8000"
     volumes:
       - ./services/globas/config:/app/config:ro
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    restart: unless-stopped
+    networks:
+      - backend
+
+  ai-economist:
+    build:
+      context: ./services/ai-economist
+    expose:
+      - "8000"
+    ports:
+      - "18110:8000"
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
