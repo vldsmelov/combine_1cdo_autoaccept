@@ -183,12 +183,28 @@ class ExtractionPipeline:
                     for key in group.fields
                     if key in aggregated
                 }
-                llm_result = await self.llm.extract(
-                    segment,
-                    group_partial,
-                    schema_override=schema_subset,
-                    field_guidelines=guidelines,
-                )
+                try:
+                    llm_result = await self.llm.extract(
+                        segment,
+                        group_partial,
+                        schema_override=schema_subset,
+                        field_guidelines=guidelines,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "LLM extractor failed for fields %s", ", ".join(group.fields)
+                    )
+                    warnings.append(
+                        WarningItem(
+                            code="llm_error",
+                            message=(
+                                "Не удалось получить данные из модели для некоторых полей; "
+                                "использованы результаты правил"
+                            ),
+                        )
+                    )
+                    continue
+
                 for field in group.fields:
                     if field in llm_result:
                         aggregated[field] = llm_result[field]
