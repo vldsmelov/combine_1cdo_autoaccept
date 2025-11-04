@@ -109,4 +109,4 @@ make logs SERVICE=legal-ai
 * Health-checkи ожидают, что сервисы отвечают на `/health`.
 * Каталоги `legal_ai_ollama` и `legal_ai_qdrant` примонтированы как Docker volume — модели и данные сохраняются между перезапусками.
 * При желании можно обращаться к сервисам напрямую, минуя прокси, например `http://localhost:18090/health`.
-* Переменные окружения Legal AI настроены на работу без GPU: модели работают на CPU, что удобнее для прототипа.
+* Legal AI и Contract Extractor собираются с PyTorch nightly `cu130` и по умолчанию запускаются на GPU (Blackwell/RTX 5090). Убедитесь, что установлен NVIDIA Container Toolkit; при необходимости можно переключиться на CPU через переменные окружения.

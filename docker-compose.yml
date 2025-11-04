@@ -75,6 +75,8 @@ services:
     image: ollama/ollama:latest
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
     ports:
       - "21434:11434"
     volumes:
@@ -83,6 +85,13 @@ services:
       <<: *healthcheck-defaults
       test: ["CMD-SHELL", "OLLAMA_HOST=127.0.0.1:11434 ollama list >/dev/null 2>&1 || exit 1"]
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
     networks:
       - backend
 
@@ -143,21 +152,23 @@ services:
       QDRANT_COLLECTION: ru_law_m3
       EMBEDDING_MODEL: BAAI/bge-m3
       RAG_TOP_K: "5"
-      EMBED_DEVICE: auto
+      EMBED_DEVICE: cuda
       PYTORCH_ALLOC_CONF: max_split_size_mb:256,expandable_segments:True
       STARTUP_CHECKS: "1"
-      STARTUP_CUDA_NAME: ""
+      STARTUP_CUDA_NAME: "1"
       SELF_CHECK_TIMEOUT: "15"
       SELF_CHECK_GEN: "0"
       EMBED_PRELOAD: "0"
       RERANK_ENABLE: "1"
       RERANK_PRELOAD: "0"
       RERANKER_MODEL: BAAI/bge-reranker-v2-m3
-      RERANK_DEVICE: cpu
+      RERANK_DEVICE: cuda
       RERANK_KEEP: "5"
       RERANK_BATCH: "8"
       RERANK_DEBUG: "0"
       NET_TEST_URLS: https://pravo.gov.ru/
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
     working_dir: /workspace/api
     command: uvicorn app:app --host 0.0.0.0 --port 8000 --log-level info
     volumes:
@@ -172,6 +183,13 @@ services:
       start_period: 60s
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
     networks:
       - backend
 

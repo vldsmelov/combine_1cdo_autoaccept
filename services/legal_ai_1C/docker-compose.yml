@@ -6,6 +6,8 @@ services:
     container_name: ollama
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
       - "11434:11434"
     volumes:
@@ -17,6 +19,13 @@ services:
       timeout: 5s
       retries: 30
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   ollama-pull:
     image: curlimages/curl:8.10.1
@@ -73,11 +82,11 @@ services:
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL}
       - RAG_TOP_K=${RAG_TOP_K}
-      - EMBED_DEVICE=auto
+      - EMBED_DEVICE=cuda
       - PYTORCH_ALLOC_CONF=max_split_size_mb:256,expandable_segments:True
       # настройки стартовых проверок (выполнятся в app.startup)
       - STARTUP_CHECKS=1
-      - STARTUP_CUDA_NAME=0      # имя GPU можно включать позже
+      - STARTUP_CUDA_NAME=1      # печатаем имя GPU при старте
       - SELF_CHECK_TIMEOUT=5   # ждать ollama/qdrant до N секунд
       - SELF_CHECK_GEN=0        # 1 = сделать тест-генерацию через ollama
       - EMBED_PRELOAD=0         # 1 = прогрузить эмбеддер на старте
@@ -85,12 +94,14 @@ services:
       - RERANK_ENABLE=1
       - RERANK_PRELOAD=0
       - RERANKER_MODEL=BAAI/bge-reranker-v2-m3
-      - RERANK_DEVICE=auto          # auto|cuda|cpu
+      - RERANK_DEVICE=cuda          # явно используем GPU
       - RERANK_KEEP=5               # сколько оставить после rerank из топ-K
       - RERANK_BATCH=16             # батч скоринга
       - RERANK_DEBUG=0              # 1 = печатать скоры в логи
       # Net-tests
       - NET_TEST_URLS=https://publication.pravo.gov.ru/,https://pravo.gov.ru/,https://docs.cntd.ru/
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
     depends_on:
       ollama:
@@ -116,7 +127,9 @@ services:
       resources:
         reservations:
           devices:
-            - capabilities: ["gpu"]
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
     restart: unless-stopped
 
 volumes:

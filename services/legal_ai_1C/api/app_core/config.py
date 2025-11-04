@@ -97,7 +97,7 @@ class Settings:
         self.QDRANT_URL = os.getenv("QDRANT_URL") or rag_cfg.get("qdrant_url", "http://qdrant:6333")
         self.QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION") or rag_cfg.get("collection", "ru_law_m3")
         self.EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL") or rag_cfg.get("embedding_model", "BAAI/bge-m3")
-        self.EMBED_DEVICE = os.getenv("EMBED_DEVICE") or rag_cfg.get("embed_device", "auto")
+        self.EMBED_DEVICE = os.getenv("EMBED_DEVICE") or rag_cfg.get("embed_device", "cuda")
         rag_top_k_raw = os.getenv("RAG_TOP_K", rag_cfg.get("top_k", 8))
         self.RAG_TOP_K = _safe_int(rag_top_k_raw, 8, "RAG_TOP_K", minimum=1)
 
@@ -110,7 +110,7 @@ class Settings:
             default=True,
         )
         self.RERANKER_MODEL = os.getenv("RERANKER_MODEL") or rerank_cfg.get("model", "BAAI/bge-reranker-v2-m3")
-        self.RERANK_DEVICE = os.getenv("RERANK_DEVICE") or rerank_cfg.get("device", "auto")
+        self.RERANK_DEVICE = os.getenv("RERANK_DEVICE") or rerank_cfg.get("device", "cuda")
         rerank_keep_raw = os.getenv("RERANK_KEEP", rerank_cfg.get("keep", 5))
         self.RERANK_KEEP = _safe_int(rerank_keep_raw, 5, "RERANK_KEEP", minimum=1)
         rerank_batch_raw = os.getenv("RERANK_BATCH", rerank_cfg.get("batch", 16))
@@ -138,9 +138,9 @@ class Settings:
         )
         startup_cuda_env = os.getenv("STARTUP_CUDA_NAME")
         self.STARTUP_CUDA_NAME = _to_bool(
-            startup_cuda_env if startup_cuda_env is not None else startup_cfg.get("cuda_name", False),
+            startup_cuda_env if startup_cuda_env is not None else startup_cfg.get("cuda_name", True),
             name="STARTUP_CUDA_NAME",
-            default=False,
+            default=True,
         )
 
         # Scoring / UI

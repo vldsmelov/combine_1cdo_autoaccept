@@ -2,6 +2,7 @@ import ast
 import json
 import re
 import hashlib
+import warnings
 from typing import Any, Dict, List
 
 try:  # pragma: no cover - optional dependency
@@ -70,7 +71,20 @@ def text_hash(t: str) -> str:
 
 def pick_device_auto(req: str) -> str:
     if req == "cuda":
-        return "cuda"
+        if torch is not None:
+            try:
+                if torch.cuda.is_available():
+                    return "cuda"
+                warnings.warn("CUDA requested but no GPU detected; falling back to CPU", stacklevel=2)
+            except Exception as exc:
+                warnings.warn(
+                    f"CUDA requested but torch.cuda.is_available() failed: {exc}; falling back to CPU",
+                    stacklevel=2,
+                )
+                return "cpu"
+        else:
+            warnings.warn("CUDA requested but torch is unavailable; falling back to CPU", stacklevel=2)
+        return "cpu"
     if req == "cpu":
         return "cpu"
     if torch is not None:

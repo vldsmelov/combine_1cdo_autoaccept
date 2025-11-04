@@ -90,14 +90,16 @@ curl -s -X POST http://localhost:8000/rag/fetch_ingest_publication
 ```
 ## 4) Режимы старта
 
-**Для быстрого и стабильного запуска используйте «лёгкие» проверки:**
+**Для быстрого и стабильного запуска используйте «лёгкие» проверки и GPU-настройки:**
 ```
 STARTUP_CHECKS=1
 SELF_CHECK_TIMEOUT=5
 SELF_CHECK_GEN=0
 EMBED_PRELOAD=0
 RERANK_PRELOAD=0
-STARTUP_CUDA_NAME=0
+EMBED_DEVICE=cuda
+RERANK_DEVICE=cuda
+STARTUP_CUDA_NAME=1
 ```
 
 **Команда:**
