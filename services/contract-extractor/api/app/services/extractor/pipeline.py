@@ -75,6 +75,35 @@ class ExtractionPipeline:
                     summary_user_tmpl_path,
                 )
 
+    def _default_value_for_field(self, field: str) -> Any:
+        properties = self.schema.get("properties", {})
+        meta = properties.get(field, {}) if isinstance(properties, dict) else {}
+        field_type = meta.get("type")
+        if isinstance(field_type, list):
+            field_type = next((item for item in field_type if isinstance(item, str)), None)
+
+        if field_type == "integer":
+            return 0
+        if field_type == "number":
+            return 0.0
+        if field_type == "boolean":
+            return False
+        if field_type == "array":
+            return []
+        if field_type == "object":
+            return {}
+        return ""
+
+    @staticmethod
+    def _is_empty_value(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return not value.strip()
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value) == 0
+        return False
+
     async def run(self, text: str) -> (
         Dict[str, Any],
         List[WarningItem],
@@ -149,9 +178,14 @@ class ExtractionPipeline:
         # 1) Правила
         partial = await self.rules.extract(cleaned_text, {})
 
+        llm_fields = tuple(self.field_settings.llm_fields())
+
         # 2) LLM (если включен)
         if self.llm is not None:
             aggregated: Dict[str, Any] = dict(partial)
+            for field in llm_fields:
+                aggregated.pop(field, None)
+            warned_missing_fields: set[str] = set()
             try:
                 self.field_settings.refresh_prompts()
                 for group in self.field_settings.build_llm_groups():
@@ -160,11 +194,7 @@ class ExtractionPipeline:
                     )
                     guidelines = self.field_settings.build_guidelines_bundle(group.fields)
                     segment = group.document_slice.extract(cleaned_text)
-                    group_partial = {
-                        key: aggregated[key]
-                        for key in group.fields
-                        if key in aggregated
-                    }
+                    group_partial: Dict[str, Any] = {}
                     try:
                         llm_result = await self.llm.extract(
                             segment,
@@ -181,15 +211,35 @@ class ExtractionPipeline:
                                 code="llm_error",
                                 message=(
                                     "Не удалось получить данные из модели для некоторых полей; "
-                                    "использованы результаты правил"
+                                    "использованы значения по умолчанию"
                                 ),
                             )
                         )
+                        for field in group.fields:
+                            if field in warned_missing_fields:
+                                continue
+                            aggregated.setdefault(
+                                field, self._default_value_for_field(field)
+                            )
+                            warned_missing_fields.add(field)
                         continue
 
                     for field in group.fields:
-                        if field in llm_result:
-                            aggregated[field] = llm_result[field]
+                        value = llm_result.get(field, None)
+                        if self._is_empty_value(value):
+                            if field not in warned_missing_fields:
+                                warnings.append(
+                                    WarningItem(
+                                        code="llm_missing_field",
+                                        message=(
+                                            f"Модель не вернула значение для поля '{field}'"
+                                        ),
+                                    )
+                                )
+                                warned_missing_fields.add(field)
+                            aggregated[field] = self._default_value_for_field(field)
+                        else:
+                            aggregated[field] = value
                     llm_prompt = getattr(self.llm, "last_prompt", "")
                     if llm_prompt:
                         prompts.append(llm_prompt)
@@ -203,12 +253,41 @@ class ExtractionPipeline:
                         code="llm_error",
                         message=(
                             "Не удалось получить данные из модели для некоторых полей; "
-                            "использованы результаты правил"
+                            "использованы значения по умолчанию"
                         ),
                     )
                 )
-                data = partial
+                aggregated = dict(partial)
+                for field in llm_fields:
+                    aggregated.pop(field, None)
+                    if field not in warned_missing_fields:
+                        warnings.append(
+                            WarningItem(
+                                code="llm_missing_field",
+                                message=(
+                                    f"Модель не вернула значение для поля '{field}'"
+                                ),
+                            )
+                        )
+                        warned_missing_fields.add(field)
+                    aggregated.setdefault(field, self._default_value_for_field(field))
+                data = aggregated
             else:
+                for field in llm_fields:
+                    if field in aggregated:
+                        continue
+                    aggregated[field] = self._default_value_for_field(field)
+                    if field in warned_missing_fields:
+                        continue
+                    warnings.append(
+                        WarningItem(
+                            code="llm_missing_field",
+                            message=(
+                                f"Модель не вернула значение для поля '{field}'"
+                            ),
+                        )
+                    )
+                    warned_missing_fields.add(field)
                 data = aggregated
         else:
             data = partial
