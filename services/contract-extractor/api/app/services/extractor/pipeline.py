@@ -175,8 +175,13 @@ class ExtractionPipeline:
             if isinstance(candidate_payment_method, str):
                 payment_method = candidate_payment_method.strip()
 
-        # 1) Правила
-        partial = await self.rules.extract(cleaned_text, {})
+        # 1) Правила (используем только если LLM отключен)
+        if self.llm is None:
+            partial: Dict[str, Any] = await self.rules.extract(cleaned_text, {})
+        else:
+            partial = {}
+
+        llm_fields = tuple(self.field_settings.llm_fields())
 
         llm_fields = tuple(self.field_settings.llm_fields())
 
