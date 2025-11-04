@@ -37,10 +37,16 @@
 2. В корне репозитория выполните:
 
    ```bash
-   make up
+   make up-core
    ```
 
-   Команда соберёт образы (включая тяжёлые слои Legal AI) и поднимет контейнеры в фоне.
+   Команда соберёт образы базовых API-сервисов и поднимет их в фоне (без Legal AI и GPU-зависимых контейнеров).
+
+   Для запуска всего стека, включая Legal AI и Ollama:
+
+   ```bash
+   make up-ml
+   ```
 
 3. Проверить готовность можно по health-check'ам или пробным запросам:
 
@@ -51,13 +57,58 @@
   curl http://localhost:8000/ai-economist/health
    ```
 
-   ⚠️ Запуск Legal AI займёт несколько минут: контейнер скачивает веса моделей Ollama и Qdrant-кластеру требуется инициализация.
+   ⚠️ Запуск Legal AI займёт несколько минут: контейнер скачивает веса моделей Ollama (по умолчанию `qwen3-vl:2b-instruct`) и Qdrant-кластеру требуется инициализация.
 
 4. Остановить стек:
 
    ```bash
    make down
    ```
+
+## Профили Docker Compose
+
+Стек разделён на профили, чтобы разработчики могли запускать только нужные сервисы:
+
+* `core` — FastAPI-сервисы (proxy, contract-extractor, globas, ai-economist, база данных).
+* `ml` — Legal AI, Ollama и Qdrant, требующие GPU и значительного объёма ресурсов.
+* `base` — служебный профиль для сборки общего образа `company/python-api-base:3.11`.
+
+Примеры команд:
+
+```bash
+# поднять только базовые API без ML
+make up-core
+
+# полный стек (core + ml)
+make up-ml
+
+# собрать только ядро
+make build-core
+
+# собрать Legal AI вместе с зависимостями
+make build-ml
+
+# пересобрать общий базовый образ Python API
+make build-base
+
+# любой произвольный набор профилей
+make up-profiles PROFILES=core,ml
+```
+
+Переменная окружения `COMPOSE_PROFILES` тоже поддерживается: `COMPOSE_PROFILES=core docker compose up`.
+
+## Общий базовый образ для Python API
+
+Повторяющиеся системные и Python-зависимости FastAPI-сервисов собраны в `services/base-images/python-api`. Образ публикуется локально как `company/python-api-base:3.11` и используется в Dockerfile'ах Globas и AI Economist.
+
+```bash
+# собрать или обновить базовый слой
+docker compose build base-python
+# либо эквивалентная команда Makefile
+make build-base
+```
+
+Это заметно ускоряет пересборку сервисов (`globas-api`, `ai-economist`): при изменении кода пересобираются только верхние слои, а базовые зависимости переиспользуются из кэша.
 
 ## Примеры запросов
 
@@ -125,4 +176,5 @@ make logs SERVICE=legal-ai
 * Health-checkи ожидают, что сервисы отвечают на `/health`.
 * Каталоги `legal_ai_ollama` и `legal_ai_qdrant` примонтированы как Docker volume — модели и данные сохраняются между перезапусками.
 * При желании можно обращаться к сервисам напрямую, минуя прокси, например `http://localhost:18090/health`.
+* Если профиль `ml` не активен, маршруты `/legal-ai/*` через прокси вернут 502 до запуска Legal AI.
 * Legal AI и Contract Extractor собираются с PyTorch nightly `cu130` и по умолчанию запускаются на GPU (Blackwell/RTX 5090). Убедитесь, что установлен NVIDIA Container Toolkit; при необходимости можно переключиться на CPU через переменные окружения.
