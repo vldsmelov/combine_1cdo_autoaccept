@@ -4,8 +4,30 @@ x-healthcheck-defaults: &healthcheck-defaults
   retries: 5
   start_period: 10s
 
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-fastapi-service: &fastapi-service
+  <<: *service-defaults
+  expose:
+    - "8000"
+  healthcheck:
+    <<: *healthcheck-defaults
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+
 services:
+  base-python:
+    image: company/python-api-base:3.11
+    build:
+      context: ./services/base-images/python-api
+    profiles: ["base"]
+    entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+
   proxy:
+    <<: *service-defaults
+    profiles: ["default", "core"]
     build: ./proxy
     ports:
       - "8000:8000"
@@ -14,14 +36,12 @@ services:
         condition: service_healthy
       globas-api:
         condition: service_healthy
-      legal-ai:
-        condition: service_healthy
       ai-economist:
         condition: service_healthy
-    networks:
-      - backend
 
   contract-extractor:
+    <<: *service-defaults
+    profiles: ["default", "core"]
     build:
       context: ./services/contract-extractor
     expose:
@@ -31,11 +51,10 @@ services:
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-    restart: unless-stopped
-    networks:
-      - backend
 
   globas-db:
+    <<: *service-defaults
+    profiles: ["default", "core"]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: globas
@@ -48,11 +67,10 @@ services:
       test: ["CMD-SHELL", "pg_isready -U globas -d globas"]
     volumes:
       - globas_db_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - backend
 
   globas-api:
+    <<: *fastapi-service
+    profiles: ["default", "core"]
     build:
       context: ./services/globas/api
     depends_on:
@@ -60,35 +78,23 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg2://globas:globas@globas-db:5432/globas
-    expose:
-      - "8000"
     ports:
       - "18090:8000"
     volumes:
       - ./services/globas/config:/app/config:ro
-    healthcheck:
-      <<: *healthcheck-defaults
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    restart: unless-stopped
-    networks:
-      - backend
 
   ai-economist:
+    <<: *fastapi-service
+    profiles: ["default", "core"]
     build:
       context: ./services/ai-economist
-    expose:
-      - "8000"
     ports:
       - "18110:8000"
-    healthcheck:
-      <<: *healthcheck-defaults
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    restart: unless-stopped
-    networks:
-      - backend
 
   legal-ai-ollama:
-    image: ollama/ollama:latest
+    <<: *service-defaults
+    profiles: ["ml"]
+    image: ollama/ollama:0.3.12
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
       NVIDIA_VISIBLE_DEVICES: all
@@ -100,7 +106,6 @@ services:
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD-SHELL", "OLLAMA_HOST=127.0.0.1:11434 ollama list >/dev/null 2>&1 || exit 1"]
-    restart: unless-stopped
     deploy:
       resources:
         reservations:
@@ -108,17 +113,17 @@ services:
             - driver: nvidia
               count: 1
               capabilities: ["gpu"]
-    networks:
-      - backend
 
   legal-ai-ollama-pull:
+    <<: *service-defaults
+    profiles: ["ml"]
     image: curlimages/curl:8.10.1
     depends_on:
       legal-ai-ollama:
         condition: service_healthy
     environment:
       OLLAMA_API: http://legal-ai-ollama:11434
-      OLLAMA_MODEL: qwen2.5:7b-instruct
+      OLLAMA_MODEL: qwen3-vl:2b-instruct
     entrypoint:
       - /bin/sh
       - -lc
@@ -137,21 +142,20 @@ services:
           | sed -u 's/^/[ollama-pull] /'
         echo "[ollama-pull] done"
     restart: "no"
-    networks:
-      - backend
 
   legal-ai-qdrant:
+    <<: *service-defaults
+    profiles: ["ml"]
     image: qdrant/qdrant:latest
     ports:
       - "26333:6333"
       - "26334:6334"
     volumes:
       - legal_ai_qdrant:/qdrant/storage
-    restart: unless-stopped
-    networks:
-      - backend
 
   legal-ai:
+    <<: *fastapi-service
+    profiles: ["ml"]
     build:
       context: ./services/legal_ai_1C/api
       dockerfile: Dockerfile
@@ -163,7 +167,7 @@ services:
         condition: service_started
     environment:
       OLLAMA_BASE_URL: http://legal-ai-ollama:11434
-      OLLAMA_MODEL: qwen2.5:7b-instruct
+      OLLAMA_MODEL: qwen3-vl:2b-instruct
       QDRANT_URL: http://legal-ai-qdrant:6333
       QDRANT_COLLECTION: ru_law_m3
       EMBEDDING_MODEL: BAAI/bge-m3
@@ -190,24 +194,12 @@ services:
     volumes:
       - ./services/legal_ai_1C/api:/workspace/api
       - ./services/legal_ai_1C/corpus:/workspace/corpus:ro
-    expose:
-      - "8000"
     ports:
       - "18100:8000"
     healthcheck:
       <<: *healthcheck-defaults
       start_period: 60s
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: ["gpu"]
-    networks:
-      - backend
 
 networks:
   backend:
